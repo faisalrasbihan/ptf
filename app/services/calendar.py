@@ -2,28 +2,12 @@ from datetime import date, timedelta
 
 import pandas_market_calendars as mcal
 
-from app.services.errors import AppError, ErrorCode
+
+US_MARKET_CALENDAR = "NYSE"
 
 
-CALENDAR_BY_EXCHANGE = {
-    "XNAS": "NASDAQ",
-    "XNYS": "NYSE",
-}
-
-
-def get_calendar_name(exchange: str) -> str:
-    try:
-        return CALENDAR_BY_EXCHANGE[exchange]
-    except KeyError as exc:
-        raise AppError(
-            ErrorCode.BAD_REQUEST,
-            f"Unsupported exchange '{exchange}'. Supported exchanges are XNAS and XNYS.",
-            400,
-        ) from exc
-
-
-def next_trading_dates(exchange: str, last_history_date: date, days: int) -> list[date]:
-    calendar = mcal.get_calendar(get_calendar_name(exchange))
+def next_us_trading_dates(last_history_date: date, days: int) -> list[date]:
+    calendar = mcal.get_calendar(US_MARKET_CALENDAR)
     start = last_history_date + timedelta(days=1)
     end = start + timedelta(days=days * 3 + 14)
 

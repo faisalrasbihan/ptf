@@ -8,15 +8,13 @@ from app.schemas.forecast import (
     ForecastResponse,
     ResolvedForecastRequest,
 )
-from app.services.calendar import get_calendar_name, next_trading_dates
+from app.services.calendar import next_us_trading_dates
 from app.services.errors import AppError, ErrorCode
 from app.services.kronos_forecaster import KronosForecaster
 from app.services.tiingo import TiingoProvider
 
 
 def resolve_request(payload: ForecastRequest, settings: Settings) -> ResolvedForecastRequest:
-    get_calendar_name(payload.exchange)
-
     days = payload.days if payload.days is not None else settings.DEFAULT_FORECAST_DAYS
     if days < settings.MIN_FORECAST_DAYS or days > settings.MAX_FORECAST_DAYS:
         raise AppError(
@@ -35,7 +33,6 @@ def resolve_request(payload: ForecastRequest, settings: Settings) -> ResolvedFor
 
     return ResolvedForecastRequest(
         ticker=payload.ticker,
-        exchange=payload.exchange,
         model_alias=model_alias,
         model_id=settings.KRONOS_MODEL_ID,
         days=days,
@@ -49,9 +46,8 @@ async def build_forecast_response(
     forecaster: KronosForecaster,
 ) -> ForecastResponse:
     resolved = resolve_request(payload, settings)
-    history = await tiingo_provider.fetch_history(resolved.ticker, resolved.exchange)
-    forecast_dates = next_trading_dates(
-        resolved.exchange,
+    history = await tiingo_provider.fetch_history(resolved.ticker)
+    forecast_dates = next_us_trading_dates(
         history[-1].date,
         resolved.days,
     )
@@ -77,7 +73,6 @@ async def build_forecast_response(
 
     return ForecastResponse(
         ticker=resolved.ticker,
-        exchange=resolved.exchange,
         history=[
             HistoryPoint(
                 date=point.date,

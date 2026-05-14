@@ -26,7 +26,7 @@ class FakeForecaster:
 
 
 def test_post_forecast_success(monkeypatch) -> None:
-    async def fake_fetch_history(self, ticker: str, exchange: str) -> list[KlinePoint]:
+    async def fake_fetch_history(self, ticker: str) -> list[KlinePoint]:
         return [
             KlinePoint(date=date(2026, 5, 13), open=183.0, high=185.0, low=182.5, close=184.1, volume=1000),
             KlinePoint(date=date(2026, 5, 14), open=184.0, high=186.0, low=183.5, close=185.2, volume=1200),
@@ -46,7 +46,7 @@ def test_post_forecast_success(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["ticker"] == "AAPL"
-    assert body["exchange"] == "XNAS"
+    assert "exchange" not in body
     assert body["model"] == "kronos-base"
     assert body["days"] == 5
     assert body["history"][0] == {
@@ -82,10 +82,10 @@ def test_post_forecast_validation_error_uses_error_envelope() -> None:
 
 
 def test_post_forecast_expected_error_uses_error_envelope(monkeypatch) -> None:
-    async def fake_fetch_history(self, ticker: str, exchange: str) -> list[KlinePoint]:
+    async def fake_fetch_history(self, ticker: str) -> list[KlinePoint]:
         raise AppError(
             ErrorCode.TICKER_NOT_FOUND,
-            f"No data found for ticker '{ticker}' on exchange '{exchange}'.",
+            f"No data found for ticker '{ticker}'.",
             404,
         )
 
@@ -104,6 +104,6 @@ def test_post_forecast_expected_error_uses_error_envelope(monkeypatch) -> None:
     assert response.json() == {
         "error": {
             "code": ErrorCode.TICKER_NOT_FOUND,
-            "message": "No data found for ticker 'XYZ' on exchange 'XNAS'.",
+            "message": "No data found for ticker 'XYZ'.",
         }
     }

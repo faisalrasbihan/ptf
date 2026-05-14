@@ -46,7 +46,7 @@ def test_tiingo_provider_parses_history(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
-    history = asyncio.run(TiingoProvider(settings).fetch_history("AAPL", "XNAS"))
+    history = asyncio.run(TiingoProvider(settings).fetch_history("AAPL"))
 
     assert [(point.date, point.open, point.high, point.low, point.close, point.volume) for point in history] == [
         (date(2026, 5, 12), 7.5, 8.2, 7.0, 8.0, 900.0),
@@ -73,7 +73,7 @@ def test_tiingo_provider_maps_status_codes(
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
     with pytest.raises(AppError) as exc:
-        asyncio.run(TiingoProvider(settings).fetch_history("AAPL", "XNAS"))
+        asyncio.run(TiingoProvider(settings).fetch_history("AAPL"))
 
     assert exc.value.code == expected_code
 
@@ -87,7 +87,7 @@ def test_tiingo_provider_maps_empty_data_to_ticker_not_found(
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
     with pytest.raises(AppError) as exc:
-        asyncio.run(TiingoProvider(settings).fetch_history("AAPL", "XNAS"))
+        asyncio.run(TiingoProvider(settings).fetch_history("AAPL"))
 
     assert exc.value.code == ErrorCode.TICKER_NOT_FOUND
 
@@ -101,6 +101,6 @@ def test_tiingo_provider_maps_malformed_shape_to_data_source_error(
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
     with pytest.raises(AppError) as exc:
-        asyncio.run(TiingoProvider(settings).fetch_history("AAPL", "XNAS"))
+        asyncio.run(TiingoProvider(settings).fetch_history("AAPL"))
 
     assert exc.value.code == ErrorCode.DATA_SOURCE_ERROR

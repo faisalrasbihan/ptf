@@ -24,7 +24,7 @@ class TiingoProvider:
     def __init__(self, settings: Settings):
         self.settings = settings
 
-    async def fetch_history(self, ticker: str, exchange: str) -> list[KlinePoint]:
+    async def fetch_history(self, ticker: str) -> list[KlinePoint]:
         if not self.settings.TIINGO_KEY:
             raise AppError(
                 ErrorCode.DATA_SOURCE_ERROR,
@@ -54,7 +54,7 @@ class TiingoProvider:
         if response.status_code == 404:
             raise AppError(
                 ErrorCode.TICKER_NOT_FOUND,
-                f"No data found for ticker '{ticker}' on exchange '{exchange}'.",
+                f"No data found for ticker '{ticker}'.",
                 404,
             )
         if response.status_code == 429:
@@ -83,7 +83,7 @@ class TiingoProvider:
         if not history:
             raise AppError(
                 ErrorCode.TICKER_NOT_FOUND,
-                f"No data found for ticker '{ticker}' on exchange '{exchange}'.",
+                f"No data found for ticker '{ticker}'.",
                 404,
             )
 

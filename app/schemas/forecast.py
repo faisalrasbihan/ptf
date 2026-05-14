@@ -6,7 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class ForecastRequest(BaseModel):
     ticker: str = Field(min_length=1)
-    exchange: str = "XNAS"
     model: str | None = None
     days: int | None = None
 
@@ -17,21 +16,6 @@ class ForecastRequest(BaseModel):
         if not ticker:
             raise ValueError("Ticker is required.")
         return ticker
-
-    @field_validator("exchange", mode="before")
-    @classmethod
-    def default_exchange(cls, value: Any) -> str:
-        if value is None or value == "":
-            return "XNAS"
-        return str(value)
-
-    @field_validator("exchange")
-    @classmethod
-    def normalize_exchange(cls, value: str) -> str:
-        exchange = value.strip().upper()
-        if not exchange:
-            raise ValueError("Exchange is required.")
-        return exchange
 
     @field_validator("model", mode="before")
     @classmethod
@@ -69,7 +53,6 @@ class ForecastPoint(BaseModel):
 
 class ForecastResponse(BaseModel):
     ticker: str
-    exchange: str
     history: list[HistoryPoint]
     forecast: list[ForecastPoint]
     model: str
@@ -90,7 +73,6 @@ class ResolvedForecastRequest(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     ticker: str
-    exchange: str
     model_alias: str
     model_id: str
     days: int

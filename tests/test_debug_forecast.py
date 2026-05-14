@@ -34,7 +34,7 @@ def test_debug_forecast_route_is_disabled_by_default() -> None:
 
 
 def test_debug_forecast_route_returns_png_when_enabled(monkeypatch) -> None:
-    async def fake_fetch_history(self, ticker: str, exchange: str) -> list[KlinePoint]:
+    async def fake_fetch_history(self, ticker: str) -> list[KlinePoint]:
         return [
             KlinePoint(date=date(2026, 5, 13), open=99.0, high=101.0, low=98.0, close=100.0, volume=1000),
             KlinePoint(date=date(2026, 5, 14), open=100.0, high=102.0, low=99.0, close=101.0, volume=1200),

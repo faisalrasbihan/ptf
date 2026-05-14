@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic-settings
+httpx
+kronos-model-arch
+pandas
+pandas-market-calendars
+matplotlib
+numpy
+torch
+pytest

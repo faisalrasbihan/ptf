@@ -1,0 +1,109 @@
+from datetime import date
+
+from fastapi.testclient import TestClient
+
+from app.main import create_app
+from app.services.kronos_forecaster import ForecastValues
+from app.services.tiingo import KlinePoint
+from app.services.errors import AppError, ErrorCode
+
+
+class FakeForecaster:
+    async def predict(
+        self,
+        history: list[KlinePoint],
+        forecast_dates: list[date],
+        timeout_seconds: float,
+    ) -> ForecastValues:
+        days = len(forecast_dates)
+        return ForecastValues(
+            open=[float(value) + 0.25 for value in range(days)],
+            high=[float(value) + 1 for value in range(days)],
+            low=[value - 1 for value in range(days)],
+            close=[float(value) for value in range(days)],
+            volume=[1000.0 + value for value in range(days)],
+        )
+
+
+def test_post_forecast_success(monkeypatch) -> None:
+    async def fake_fetch_history(self, ticker: str, exchange: str) -> list[KlinePoint]:
+        return [
+            KlinePoint(date=date(2026, 5, 13), open=183.0, high=185.0, low=182.5, close=184.1, volume=1000),
+            KlinePoint(date=date(2026, 5, 14), open=184.0, high=186.0, low=183.5, close=185.2, volume=1200),
+        ]
+
+    monkeypatch.setattr(
+        "app.services.tiingo.TiingoProvider.fetch_history",
+        fake_fetch_history,
+    )
+
+    app = create_app(load_model=False)
+    app.state.forecaster = FakeForecaster()
+
+    with TestClient(app) as client:
+        response = client.post("/forecast", json={"ticker": " aapl ", "days": 5})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ticker"] == "AAPL"
+    assert body["exchange"] == "XNAS"
+    assert body["model"] == "kronos-base"
+    assert body["days"] == 5
+    assert body["history"][0] == {
+        "date": "2026-05-13",
+        "open": 183.0,
+        "high": 185.0,
+        "low": 182.5,
+        "close": 184.1,
+        "volume": 1000.0,
+    }
+    assert len(body["forecast"]) == 5
+    assert body["forecast"][0]["date"] == "2026-05-15"
+    assert body["forecast"][0] == {
+        "date": "2026-05-15",
+        "open": 0.25,
+        "high": 1.0,
+        "low": -1.0,
+        "close": 0.0,
+        "volume": 1000.0,
+        "median": 0.0,
+    }
+
+
+def test_post_forecast_validation_error_uses_error_envelope() -> None:
+    app = create_app(load_model=False)
+    app.state.forecaster = FakeForecaster()
+
+    with TestClient(app) as client:
+        response = client.post("/forecast", json={"ticker": ""})
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == ErrorCode.BAD_REQUEST
+
+
+def test_post_forecast_expected_error_uses_error_envelope(monkeypatch) -> None:
+    async def fake_fetch_history(self, ticker: str, exchange: str) -> list[KlinePoint]:
+        raise AppError(
+            ErrorCode.TICKER_NOT_FOUND,
+            f"No data found for ticker '{ticker}' on exchange '{exchange}'.",
+            404,
+        )
+
+    monkeypatch.setattr(
+        "app.services.tiingo.TiingoProvider.fetch_history",
+        fake_fetch_history,
+    )
+
+    app = create_app(load_model=False)
+    app.state.forecaster = FakeForecaster()
+
+    with TestClient(app) as client:
+        response = client.post("/forecast", json={"ticker": "XYZ"})
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "error": {
+            "code": ErrorCode.TICKER_NOT_FOUND,
+            "message": "No data found for ticker 'XYZ' on exchange 'XNAS'.",
+        }
+    }

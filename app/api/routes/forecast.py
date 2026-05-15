@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.dependencies import get_forecaster
+from app.api.dependencies import get_model_registry
 from app.core.config import settings
 from app.schemas.forecast import ForecastRequest, ForecastResponse
 from app.services.errors import AppError
@@ -14,6 +14,21 @@ from app.services.tiingo import TiingoProvider
 
 
 router = APIRouter()
+
+
+@router.get("/models")
+def list_forecast_models(request: Request) -> dict[str, list[dict[str, str]]]:
+    registry = get_model_registry(request)
+    return {
+        "models": [
+            {
+                "alias": spec.alias,
+                "display_name": spec.display_name,
+                "model_id": spec.model_id,
+            }
+            for spec in registry.specs
+        ]
+    }
 
 
 @router.post("", response_model=ForecastResponse)
@@ -28,7 +43,7 @@ async def create_forecast(
         payload=payload,
         settings=settings,
         tiingo_provider=TiingoProvider(settings),
-        forecaster=get_forecaster(request),
+        model_registry=get_model_registry(request),
     )
 
 
@@ -60,7 +75,7 @@ def _forecast_stream_response(payload: ForecastRequest, request: Request) -> Str
                 payload=payload,
                 settings=settings,
                 tiingo_provider=TiingoProvider(settings),
-                forecaster=get_forecaster(request),
+                model_registry=get_model_registry(request),
                 progress=report_progress,
             )
         )

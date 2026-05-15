@@ -16,6 +16,16 @@ def test_forecast_request_defaults_and_normalizes() -> None:
     assert resolved.days == 30
 
 
+@pytest.mark.parametrize("model_alias", ["kronos-base", "amazon-chronos-2", "google-timesfm-2.5"])
+def test_resolve_request_accepts_supported_models(model_alias: str) -> None:
+    payload = ForecastRequest(ticker="AAPL", model=model_alias, days=5)
+
+    resolved = resolve_request(payload, settings)
+
+    assert resolved.model_alias == model_alias
+    assert resolved.days == 5
+
+
 def test_forecast_request_rejects_empty_ticker() -> None:
     with pytest.raises(ValidationError):
         ForecastRequest(ticker="   ")

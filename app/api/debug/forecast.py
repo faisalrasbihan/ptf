@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, Response
 
-from app.api.dependencies import get_forecaster
+from app.api.dependencies import get_model_registry
 from app.core.config import settings
 from app.schemas.forecast import ForecastRequest
 from app.services.debug_chart import render_forecast_png
@@ -23,7 +23,7 @@ async def debug_forecast_chart(
         payload=payload,
         settings=settings,
         tiingo_provider=TiingoProvider(settings),
-        forecaster=get_forecaster(request),
+        model_registry=get_model_registry(request),
     )
     return Response(
         content=render_forecast_png(forecast),

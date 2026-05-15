@@ -3,13 +3,20 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.services.forecast_models import ForecastModelSpec
 from app.services.kronos_forecaster import ForecastValues
 from app.services.tiingo import KlinePoint
 
 
-class FakeForecaster:
+class FakeModelRegistry:
+    specs = [ForecastModelSpec("kronos-base", "Kronos Base", "NeoQuasar/Kronos-base")]
+
+    def resolve(self, alias: str | None) -> ForecastModelSpec:
+        return self.specs[0]
+
     async def predict(
         self,
+        model_alias: str,
         history: list[KlinePoint],
         forecast_dates: list[date],
         timeout_seconds: float,
@@ -46,7 +53,7 @@ def test_debug_forecast_route_returns_png_when_enabled(monkeypatch) -> None:
     )
 
     app = create_app(load_model=False, debug_endpoints_enabled=True)
-    app.state.forecaster = FakeForecaster()
+    app.state.model_registry = FakeModelRegistry()
 
     with TestClient(app) as client:
         response = client.get("/debug/forecast/aapl?days=5")

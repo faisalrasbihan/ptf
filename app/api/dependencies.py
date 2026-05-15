@@ -1,12 +1,12 @@
 from fastapi import Request
 
 from app.core.config import settings
-from app.services.kronos_forecaster import KronosForecaster
+from app.services.forecast_models import ForecastModelRegistry
 
 
-def get_forecaster(request: Request) -> KronosForecaster:
-    forecaster: KronosForecaster | None = getattr(request.app.state, "forecaster", None)
-    if forecaster is None:
-        forecaster = KronosForecaster.from_settings(settings)
-        request.app.state.forecaster = forecaster
-    return forecaster
+def get_model_registry(request: Request) -> ForecastModelRegistry:
+    registry: ForecastModelRegistry | None = getattr(request.app.state, "model_registry", None)
+    if registry is None:
+        registry = ForecastModelRegistry(settings)
+        request.app.state.model_registry = registry
+    return registry

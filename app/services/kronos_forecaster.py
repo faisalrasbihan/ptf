@@ -7,6 +7,7 @@ from model import Kronos, KronosPredictor, KronosTokenizer
 
 from app.core.config import Settings
 from app.services.errors import AppError, ErrorCode
+from app.services.forecast_history import prepare_history
 from app.services.tiingo import KlinePoint
 
 
@@ -53,6 +54,8 @@ class KronosForecaster:
                 "Forecast model timed out.",
                 504,
             ) from exc
+        except AppError:
+            raise
         except Exception as exc:
             raise AppError(
                 ErrorCode.MODEL_TIMEOUT,
@@ -65,7 +68,7 @@ class KronosForecaster:
         history: list[KlinePoint],
         forecast_dates: list[date],
     ) -> ForecastValues:
-        context = history[-self.settings.KRONOS_MAX_CONTEXT :]
+        context = prepare_history(history, require_ohlcv=True)[-self.settings.KRONOS_MAX_CONTEXT :]
         x_df = pd.DataFrame(
             {
                 "open": [point.open for point in context],

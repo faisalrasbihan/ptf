@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from app.api.routes import router
 from app.core.config import settings
 from app.services.errors import AppError, ErrorCode
-from app.services.kronos_forecaster import KronosForecaster
+from app.services.forecast_models import ForecastModelRegistry
 
 
 def create_app(
@@ -18,7 +18,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if load_model:
-            app.state.forecaster = KronosForecaster.from_settings(settings)
+            app.state.model_registry = ForecastModelRegistry(settings)
         yield
 
     app = FastAPI(

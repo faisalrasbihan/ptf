@@ -3,6 +3,9 @@ uvicorn[standard]
 pydantic-settings
 httpx
 kronos-model-arch
+chronos-forecasting>=2.0
+timesfm @ git+https://github.com/google-research/timesfm.git
+transformers==4.53.3
 pandas
 pandas-market-calendars
 matplotlib

@@ -4,6 +4,7 @@ from datetime import date
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.services.forecast_models import ForecastModelSpec
 from app.services.kronos_forecaster import ForecastValues
 from app.services.tiingo import KlinePoint
 from app.services.errors import AppError, ErrorCode
@@ -24,9 +25,23 @@ def _parse_sse_events(payload: str) -> list[tuple[str, dict[str, object]]]:
     return events
 
 
-class FakeForecaster:
+class FakeModelRegistry:
+    specs = [
+        ForecastModelSpec("kronos-base", "Kronos Base", "NeoQuasar/Kronos-base"),
+        ForecastModelSpec("amazon-chronos-2", "Amazon Chronos-2", "amazon/chronos-2"),
+        ForecastModelSpec("google-timesfm-2.5", "Google TimesFM 2.5", "google/timesfm-2.5-200m-pytorch"),
+    ]
+
+    def resolve(self, alias: str | None) -> ForecastModelSpec:
+        model_alias = alias or "kronos-base"
+        for spec in self.specs:
+            if spec.alias == model_alias:
+                return spec
+        raise AppError(ErrorCode.BAD_REQUEST, f"Unsupported model '{model_alias}'.", 400)
+
     async def predict(
         self,
+        model_alias: str,
         history: list[KlinePoint],
         forecast_dates: list[date],
         timeout_seconds: float,
@@ -54,7 +69,7 @@ def test_post_forecast_success(monkeypatch) -> None:
     )
 
     app = create_app(load_model=False)
-    app.state.forecaster = FakeForecaster()
+    app.state.model_registry = FakeModelRegistry()
 
     with TestClient(app) as client:
         response = client.post("/forecast", json={"ticker": " aapl ", "days": 5})
@@ -86,6 +101,71 @@ def test_post_forecast_success(monkeypatch) -> None:
     }
 
 
+def test_get_forecast_models_lists_supported_aliases() -> None:
+    app = create_app(load_model=False)
+    app.state.model_registry = FakeModelRegistry()
+
+    with TestClient(app) as client:
+        response = client.get("/forecast/models")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "models": [
+            {
+                "alias": "kronos-base",
+                "display_name": "Kronos Base",
+                "model_id": "NeoQuasar/Kronos-base",
+            },
+            {
+                "alias": "amazon-chronos-2",
+                "display_name": "Amazon Chronos-2",
+                "model_id": "amazon/chronos-2",
+            },
+            {
+                "alias": "google-timesfm-2.5",
+                "display_name": "Google TimesFM 2.5",
+                "model_id": "google/timesfm-2.5-200m-pytorch",
+            },
+        ]
+    }
+
+
+def test_post_forecast_accepts_chronos_model(monkeypatch) -> None:
+    async def fake_fetch_history(self, ticker: str) -> list[KlinePoint]:
+        return [
+            KlinePoint(date=date(2026, 5, 13), open=183.0, high=185.0, low=182.5, close=184.1, volume=1000),
+            KlinePoint(date=date(2026, 5, 14), open=184.0, high=186.0, low=183.5, close=185.2, volume=1200),
+        ]
+
+    monkeypatch.setattr("app.services.tiingo.TiingoProvider.fetch_history", fake_fetch_history)
+    app = create_app(load_model=False)
+    app.state.model_registry = FakeModelRegistry()
+
+    with TestClient(app) as client:
+        response = client.post("/forecast", json={"ticker": "aapl", "days": 5, "model": "amazon-chronos-2"})
+
+    assert response.status_code == 200
+    assert response.json()["model"] == "amazon-chronos-2"
+
+
+def test_post_forecast_accepts_timesfm_model(monkeypatch) -> None:
+    async def fake_fetch_history(self, ticker: str) -> list[KlinePoint]:
+        return [
+            KlinePoint(date=date(2026, 5, 13), open=183.0, high=185.0, low=182.5, close=184.1, volume=1000),
+            KlinePoint(date=date(2026, 5, 14), open=184.0, high=186.0, low=183.5, close=185.2, volume=1200),
+        ]
+
+    monkeypatch.setattr("app.services.tiingo.TiingoProvider.fetch_history", fake_fetch_history)
+    app = create_app(load_model=False)
+    app.state.model_registry = FakeModelRegistry()
+
+    with TestClient(app) as client:
+        response = client.post("/forecast", json={"ticker": "aapl", "days": 5, "model": "google-timesfm-2.5"})
+
+    assert response.status_code == 200
+    assert response.json()["model"] == "google-timesfm-2.5"
+
+
 def test_post_forecast_streams_progress_and_result(monkeypatch) -> None:
     async def fake_fetch_history(self, ticker: str) -> list[KlinePoint]:
         return [
@@ -99,7 +179,7 @@ def test_post_forecast_streams_progress_and_result(monkeypatch) -> None:
     )
 
     app = create_app(load_model=False)
-    app.state.forecaster = FakeForecaster()
+    app.state.model_registry = FakeModelRegistry()
 
     with TestClient(app) as client:
         with client.stream(
@@ -138,7 +218,7 @@ def test_post_forecast_streams_progress_and_result(monkeypatch) -> None:
 
 def test_post_forecast_validation_error_uses_error_envelope() -> None:
     app = create_app(load_model=False)
-    app.state.forecaster = FakeForecaster()
+    app.state.model_registry = FakeModelRegistry()
 
     with TestClient(app) as client:
         response = client.post("/forecast", json={"ticker": ""})
@@ -161,7 +241,7 @@ def test_post_forecast_streams_expected_error(monkeypatch) -> None:
     )
 
     app = create_app(load_model=False)
-    app.state.forecaster = FakeForecaster()
+    app.state.model_registry = FakeModelRegistry()
 
     with TestClient(app) as client:
         with client.stream(
@@ -198,7 +278,7 @@ def test_post_forecast_expected_error_uses_error_envelope(monkeypatch) -> None:
     )
 
     app = create_app(load_model=False)
-    app.state.forecaster = FakeForecaster()
+    app.state.model_registry = FakeModelRegistry()
 
     with TestClient(app) as client:
         response = client.post("/forecast", json={"ticker": "XYZ"})

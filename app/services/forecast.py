@@ -11,7 +11,7 @@ from app.schemas.forecast import (
 )
 from app.services.calendar import next_us_trading_dates
 from app.services.errors import AppError, ErrorCode
-from app.services.kronos_forecaster import KronosForecaster
+from app.services.forecast_models import ForecastModelRegistry
 from app.services.tiingo import TiingoProvider
 
 
@@ -28,7 +28,11 @@ async def _report_progress(
         await progress(phase, message, percent)
 
 
-def resolve_request(payload: ForecastRequest, settings: Settings) -> ResolvedForecastRequest:
+def resolve_request(
+    payload: ForecastRequest,
+    settings: Settings,
+    model_registry: ForecastModelRegistry | None = None,
+) -> ResolvedForecastRequest:
     days = payload.days if payload.days is not None else settings.DEFAULT_FORECAST_DAYS
     if days < settings.MIN_FORECAST_DAYS or days > settings.MAX_FORECAST_DAYS:
         raise AppError(
@@ -37,18 +41,13 @@ def resolve_request(payload: ForecastRequest, settings: Settings) -> ResolvedFor
             400,
         )
 
-    model_alias = payload.model or settings.KRONOS_MODEL_ALIAS
-    if model_alias != settings.KRONOS_MODEL_ALIAS:
-        raise AppError(
-            ErrorCode.BAD_REQUEST,
-            f"Unsupported model '{model_alias}'. Supported model is {settings.KRONOS_MODEL_ALIAS}.",
-            400,
-        )
+    registry = model_registry or ForecastModelRegistry(settings)
+    model_spec = registry.resolve(payload.model)
 
     return ResolvedForecastRequest(
         ticker=payload.ticker,
-        model_alias=model_alias,
-        model_id=settings.KRONOS_MODEL_ID,
+        model_alias=model_spec.alias,
+        model_id=model_spec.model_id,
         days=days,
     )
 
@@ -57,11 +56,11 @@ async def build_forecast_response(
     payload: ForecastRequest,
     settings: Settings,
     tiingo_provider: TiingoProvider,
-    forecaster: KronosForecaster,
+    model_registry: ForecastModelRegistry,
     progress: ProgressReporter | None = None,
 ) -> ForecastResponse:
     await _report_progress(progress, "validating_request", "Validating forecast request.", 5)
-    resolved = resolve_request(payload, settings)
+    resolved = resolve_request(payload, settings, model_registry)
 
     await _report_progress(progress, "fetching_history", "Fetching historical market data.", 20)
     history = await tiingo_provider.fetch_history(resolved.ticker)
@@ -72,8 +71,9 @@ async def build_forecast_response(
         resolved.days,
     )
 
-    await _report_progress(progress, "running_model", "Running Kronos forecast model.", 55)
-    forecast_values = await forecaster.predict(
+    await _report_progress(progress, "running_model", f"Running {resolved.model_alias} forecast model.", 55)
+    forecast_values = await model_registry.predict(
+        resolved.model_alias,
         history,
         forecast_dates,
         settings.MODEL_TIMEOUT_SECONDS,

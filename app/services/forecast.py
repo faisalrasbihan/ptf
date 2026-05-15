@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from app.core.config import Settings
@@ -12,6 +13,19 @@ from app.services.calendar import next_us_trading_dates
 from app.services.errors import AppError, ErrorCode
 from app.services.kronos_forecaster import KronosForecaster
 from app.services.tiingo import TiingoProvider
+
+
+ProgressReporter = Callable[[str, str, int], Awaitable[None]]
+
+
+async def _report_progress(
+    progress: ProgressReporter | None,
+    phase: str,
+    message: str,
+    percent: int,
+) -> None:
+    if progress is not None:
+        await progress(phase, message, percent)
 
 
 def resolve_request(payload: ForecastRequest, settings: Settings) -> ResolvedForecastRequest:
@@ -44,20 +58,28 @@ async def build_forecast_response(
     settings: Settings,
     tiingo_provider: TiingoProvider,
     forecaster: KronosForecaster,
+    progress: ProgressReporter | None = None,
 ) -> ForecastResponse:
+    await _report_progress(progress, "validating_request", "Validating forecast request.", 5)
     resolved = resolve_request(payload, settings)
+
+    await _report_progress(progress, "fetching_history", "Fetching historical market data.", 20)
     history = await tiingo_provider.fetch_history(resolved.ticker)
+
+    await _report_progress(progress, "building_calendar", "Building forecast trading calendar.", 35)
     forecast_dates = next_us_trading_dates(
         history[-1].date,
         resolved.days,
     )
 
+    await _report_progress(progress, "running_model", "Running Kronos forecast model.", 55)
     forecast_values = await forecaster.predict(
         history,
         forecast_dates,
         settings.MODEL_TIMEOUT_SECONDS,
     )
 
+    await _report_progress(progress, "formatting_response", "Formatting forecast response.", 90)
     forecast = [
         ForecastPoint(
             date=forecast_dates[index],

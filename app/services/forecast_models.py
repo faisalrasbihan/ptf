@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
+import json
+import os
 from typing import Protocol
 
 import numpy as np
@@ -168,7 +170,7 @@ class TimesFMForecaster:
     def from_settings(cls, settings: Settings) -> "TimesFMForecaster":
         import timesfm
 
-        model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(settings.TIMESFM_MODEL_ID)
+        model = _load_timesfm_2p5_model(timesfm.TimesFM_2p5_200M_torch, settings.TIMESFM_MODEL_ID)
         model.compile(
             timesfm.ForecastConfig(
                 max_context=settings.TIMESFM_MAX_CONTEXT,
@@ -296,3 +298,55 @@ def _timesfm_bounds(quantile_forecast: object, median: list[float]) -> tuple[lis
             [float(value) for value in quantiles[0, :horizon, -1]],
         )
     return median, median
+
+
+def _load_timesfm_2p5_model(model_cls: object, model_id: str) -> object:
+    config = _load_hub_config(model_id)
+    model_kwargs: dict[str, object] = {}
+    init_parameters = getattr(model_cls, "_hub_mixin_init_parameters", {})
+    if config is not None:
+        for name in init_parameters:
+            if name != "self" and name != "config" and name in config:
+                model_kwargs[name] = config[name]
+        if "config" in init_parameters:
+            model_kwargs["config"] = config
+
+    return model_cls._from_pretrained(
+        model_id=model_id,
+        revision=None,
+        cache_dir=None,
+        force_download=False,
+        local_files_only=False,
+        token=None,
+        **model_kwargs,
+    )
+
+
+def _load_hub_config(model_id: str) -> dict[str, object] | None:
+    from huggingface_hub import constants, hf_hub_download
+    from huggingface_hub.utils import HfHubHTTPError
+
+    config_file: str | None = None
+    if os.path.isdir(model_id):
+        path = os.path.join(model_id, constants.CONFIG_NAME)
+        if os.path.exists(path):
+            config_file = path
+    else:
+        try:
+            config_file = hf_hub_download(
+                repo_id=model_id,
+                filename=constants.CONFIG_NAME,
+                revision=None,
+                cache_dir=None,
+                force_download=False,
+                token=None,
+                local_files_only=False,
+            )
+        except HfHubHTTPError:
+            config_file = None
+
+    if config_file is None:
+        return None
+
+    with open(config_file, encoding="utf-8") as file:
+        return json.load(file)

@@ -13,6 +13,7 @@ from app.services.forecast_models import (
     ForecastModelRegistry,
     ForecastModelSpec,
     TimesFMForecaster,
+    _load_timesfm_2p5_model,
 )
 from app.services.kronos_forecaster import ForecastValues
 from app.services.tiingo import KlinePoint
@@ -155,3 +156,42 @@ def test_timesfm_adapter_maps_point_forecast_and_quantile_bounds() -> None:
     assert forecast.low == [9.0, 10.0, 11.0]
     assert forecast.high == [14.0, 15.0, 16.0]
     assert forecast.volume == [1200.0, 1200.0, 1200.0]
+
+
+def test_timesfm_loader_avoids_hub_mixin_proxy_kwargs(monkeypatch) -> None:
+    calls: list[dict[str, object]] = []
+
+    class FakeTimesFM:
+        _hub_mixin_init_parameters = {
+            "self": object(),
+            "torch_compile": object(),
+            "config": object(),
+        }
+
+        @classmethod
+        def _from_pretrained(cls, **kwargs):
+            calls.append(kwargs)
+            return cls()
+
+    monkeypatch.setattr(
+        "app.services.forecast_models._load_hub_config",
+        lambda model_id: {"torch_compile": False, "ignored": "value"},
+    )
+
+    model = _load_timesfm_2p5_model(FakeTimesFM, "google/timesfm-2.5-200m-pytorch")
+
+    assert isinstance(model, FakeTimesFM)
+    assert calls == [
+        {
+            "model_id": "google/timesfm-2.5-200m-pytorch",
+            "revision": None,
+            "cache_dir": None,
+            "force_download": False,
+            "local_files_only": False,
+            "token": None,
+            "torch_compile": False,
+            "config": {"torch_compile": False, "ignored": "value"},
+        }
+    ]
+    assert "proxies" not in calls[0]
+    assert "resume_download" not in calls[0]

@@ -18,7 +18,9 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if load_model:
-            app.state.model_registry = ForecastModelRegistry(settings)
+            model_registry = ForecastModelRegistry(settings)
+            await model_registry.load_all()
+            app.state.model_registry = model_registry
         yield
 
     app = FastAPI(

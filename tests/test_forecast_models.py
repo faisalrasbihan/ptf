@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from app.main import create_app
+from app.services.errors import AppError
 from app.services.forecast_models import (
     Chronos2Forecaster,
     ForecastModelRegistry,
@@ -35,7 +36,7 @@ def _history() -> list[KlinePoint]:
     ]
 
 
-def test_registry_loads_lazily_and_caches_one_instance_per_alias() -> None:
+def test_registry_preloads_and_reuses_one_instance_per_alias() -> None:
     created: list[str] = []
     specs = [
         ForecastModelSpec("one", "One", "model-one"),
@@ -56,26 +57,49 @@ def test_registry_loads_lazily_and_caches_one_instance_per_alias() -> None:
     )
 
     assert created == []
-    first = asyncio.run(registry.get("one"))
-    second = asyncio.run(registry.get("one"))
-    third = asyncio.run(registry.get("two"))
+    try:
+        registry.get("one")
+    except AppError:
+        pass
+    else:
+        raise AssertionError("model should be unavailable before preload")
+
+    asyncio.run(registry.load_all())
+    first = registry.get("one")
+    second = registry.get("one")
+    third = registry.get("two")
 
     assert first is second
     assert third is not first
     assert created == ["one", "two"]
 
 
-def test_app_startup_creates_registry_without_loading_models(monkeypatch) -> None:
-    def fail_load(*args, **kwargs):
-        raise AssertionError("model should not load at startup")
+def test_app_startup_preloads_models_before_health_is_ready(monkeypatch) -> None:
+    created: list[str] = []
+    specs = [
+        ForecastModelSpec("one", "One", "model-one"),
+        ForecastModelSpec("two", "Two", "model-two"),
+    ]
 
-    monkeypatch.setattr("app.services.forecast_models.KronosForecaster.from_settings", fail_load)
+    def factory(alias: str):
+        def create() -> FakeAdapter:
+            created.append(alias)
+            return FakeAdapter()
+
+        return create
+
+    monkeypatch.setattr("app.services.forecast_models.default_model_specs", lambda _: specs)
+    monkeypatch.setattr(
+        "app.services.forecast_models.default_model_factories",
+        lambda _: {"one": factory("one"), "two": factory("two")},
+    )
 
     app = create_app(load_model=True)
     with TestClient(app) as client:
         response = client.get("/health")
 
     assert response.status_code == 200
+    assert sorted(created) == ["one", "two"]
 
 
 def test_chronos_adapter_maps_quantiles_to_close_band() -> None:

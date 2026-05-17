@@ -21,21 +21,30 @@ class ForecastValues:
 
 
 class KronosForecaster:
-    def __init__(self, predictor: KronosPredictor, settings: Settings):
+    def __init__(self, predictor: KronosPredictor, settings: Settings, max_context: int | None = None):
         self.predictor = predictor
         self.settings = settings
+        self.max_context = max_context or settings.KRONOS_MAX_CONTEXT
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "KronosForecaster":
-        tokenizer = KronosTokenizer.from_pretrained(settings.KRONOS_TOKENIZER_ID)
-        model = Kronos.from_pretrained(settings.KRONOS_MODEL_ID)
+    def from_settings(
+        cls,
+        settings: Settings,
+        *,
+        model_id: str | None = None,
+        tokenizer_id: str | None = None,
+        max_context: int | None = None,
+    ) -> "KronosForecaster":
+        tokenizer = KronosTokenizer.from_pretrained(tokenizer_id or settings.KRONOS_TOKENIZER_ID)
+        model = Kronos.from_pretrained(model_id or settings.KRONOS_MODEL_ID)
+        resolved_max_context = max_context or settings.KRONOS_MAX_CONTEXT
         predictor = KronosPredictor(
             model,
             tokenizer,
             device=settings.KRONOS_DEVICE,
-            max_context=settings.KRONOS_MAX_CONTEXT,
+            max_context=resolved_max_context,
         )
-        return cls(predictor, settings)
+        return cls(predictor, settings, resolved_max_context)
 
     async def predict(
         self,
@@ -68,7 +77,7 @@ class KronosForecaster:
         history: list[KlinePoint],
         forecast_dates: list[date],
     ) -> ForecastValues:
-        context = prepare_history(history, require_ohlcv=True)[-self.settings.KRONOS_MAX_CONTEXT :]
+        context = prepare_history(history, require_ohlcv=True)[-self.max_context :]
         x_df = pd.DataFrame(
             {
                 "open": [point.open for point in context],

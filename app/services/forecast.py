@@ -31,7 +31,7 @@ async def _report_progress(
 def resolve_request(
     payload: ForecastRequest,
     settings: Settings,
-    model_registry: ForecastModelRegistry | None = None,
+    model_registry: ForecastModelRegistry,
 ) -> ResolvedForecastRequest:
     days = payload.days if payload.days is not None else settings.DEFAULT_FORECAST_DAYS
     if days < settings.MIN_FORECAST_DAYS or days > settings.MAX_FORECAST_DAYS:
@@ -41,8 +41,7 @@ def resolve_request(
             400,
         )
 
-    registry = model_registry or ForecastModelRegistry(settings)
-    model_spec = registry.resolve(payload.model)
+    model_spec = model_registry.resolve(payload.model)
 
     return ResolvedForecastRequest(
         ticker=payload.ticker,
@@ -61,22 +60,52 @@ async def build_forecast_response(
 ) -> ForecastResponse:
     await _report_progress(progress, "validating_request", "Validating forecast request.", 5)
     resolved = resolve_request(payload, settings, model_registry)
+    await _report_progress(
+        progress,
+        "model_selected",
+        f"Using {resolved.model_alias} for {resolved.ticker} over {resolved.days} trading days.",
+        12,
+    )
 
     await _report_progress(progress, "fetching_history", "Fetching historical market data.", 20)
     history = await tiingo_provider.fetch_history(resolved.ticker)
+    await _report_progress(
+        progress,
+        "history_ready",
+        f"Loaded {len(history)} historical price bars for {resolved.ticker}.",
+        35,
+    )
 
-    await _report_progress(progress, "building_calendar", "Building forecast trading calendar.", 35)
+    await _report_progress(progress, "building_calendar", "Building forecast trading calendar.", 42)
     forecast_dates = next_us_trading_dates(
         history[-1].date,
         resolved.days,
     )
+    await _report_progress(
+        progress,
+        "calendar_ready",
+        f"Prepared {len(forecast_dates)} future trading dates.",
+        50,
+    )
 
-    await _report_progress(progress, "running_model", f"Running {resolved.model_alias} forecast model.", 55)
+    await _report_progress(
+        progress,
+        "preparing_model_input",
+        f"Preparing historical market context for {resolved.model_alias}.",
+        58,
+    )
+    await _report_progress(progress, "running_model", f"Running {resolved.model_alias} forecast model.", 65)
     forecast_values = await model_registry.predict(
         resolved.model_alias,
         history,
         forecast_dates,
         settings.MODEL_TIMEOUT_SECONDS,
+    )
+    await _report_progress(
+        progress,
+        "model_complete",
+        f"{resolved.model_alias} returned {len(forecast_values.close)} forecast points.",
+        82,
     )
 
     await _report_progress(progress, "formatting_response", "Formatting forecast response.", 90)

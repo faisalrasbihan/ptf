@@ -27,13 +27,15 @@ def _parse_sse_events(payload: str) -> list[tuple[str, dict[str, object]]]:
 
 class FakeModelRegistry:
     specs = [
+        ForecastModelSpec("kronos-mini", "Kronos Mini", "NeoQuasar/Kronos-mini"),
+        ForecastModelSpec("kronos-small", "Kronos Small", "NeoQuasar/Kronos-small"),
         ForecastModelSpec("kronos-base", "Kronos Base", "NeoQuasar/Kronos-base"),
         ForecastModelSpec("amazon-chronos-2", "Amazon Chronos-2", "amazon/chronos-2"),
         ForecastModelSpec("google-timesfm-2.5", "Google TimesFM 2.5", "google/timesfm-2.5-200m-pytorch"),
     ]
 
     def resolve(self, alias: str | None) -> ForecastModelSpec:
-        model_alias = alias or "kronos-base"
+        model_alias = alias or "kronos-mini"
         for spec in self.specs:
             if spec.alias == model_alias:
                 return spec
@@ -78,7 +80,7 @@ def test_post_forecast_success(monkeypatch) -> None:
     body = response.json()
     assert body["ticker"] == "AAPL"
     assert "exchange" not in body
-    assert body["model"] == "kronos-base"
+    assert body["model"] == "kronos-mini"
     assert body["days"] == 5
     assert body["history"][0] == {
         "date": "2026-05-13",
@@ -111,6 +113,16 @@ def test_get_forecast_models_lists_supported_aliases() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "models": [
+            {
+                "alias": "kronos-mini",
+                "display_name": "Kronos Mini",
+                "model_id": "NeoQuasar/Kronos-mini",
+            },
+            {
+                "alias": "kronos-small",
+                "display_name": "Kronos Small",
+                "model_id": "NeoQuasar/Kronos-small",
+            },
             {
                 "alias": "kronos-base",
                 "display_name": "Kronos Base",
@@ -197,9 +209,14 @@ def test_post_forecast_streams_progress_and_result(monkeypatch) -> None:
     progress_phases = [data["phase"] for event, data in events if event == "progress"]
     assert progress_phases == [
         "validating_request",
+        "model_selected",
         "fetching_history",
+        "history_ready",
         "building_calendar",
+        "calendar_ready",
+        "preparing_model_input",
         "running_model",
+        "model_complete",
         "formatting_response",
     ]
 

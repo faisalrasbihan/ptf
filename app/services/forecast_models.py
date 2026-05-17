@@ -42,13 +42,13 @@ class ForecastModelRegistry:
         *,
         specs: list[ForecastModelSpec] | None = None,
         factories: dict[str, ModelFactory] | None = None,
+        instances: dict[str, ForecastAdapter] | None = None,
     ):
         self.settings = settings
         self._specs = specs if specs is not None else default_model_specs(settings)
         self._spec_by_alias = {spec.alias: spec for spec in self._specs}
         self._factories = factories if factories is not None else default_model_factories(settings)
-        self._instances: dict[str, ForecastAdapter] = {}
-        self._locks = {alias: asyncio.Lock() for alias in self._spec_by_alias}
+        self._instances: dict[str, ForecastAdapter] = instances or {}
 
     @property
     def specs(self) -> list[ForecastModelSpec]:
@@ -66,15 +66,22 @@ class ForecastModelRegistry:
             )
         return spec
 
-    async def get(self, alias: str) -> ForecastAdapter:
-        self.resolve(alias)
-        if alias in self._instances:
-            return self._instances[alias]
+    async def load_all(self) -> None:
+        aliases = [spec.alias for spec in self._specs if spec.alias not in self._instances]
+        adapters = await asyncio.gather(
+            *(asyncio.to_thread(self._factories[alias]) for alias in aliases)
+        )
+        self._instances.update(zip(aliases, adapters, strict=True))
 
-        async with self._locks[alias]:
-            if alias not in self._instances:
-                self._instances[alias] = await asyncio.to_thread(self._factories[alias])
-            return self._instances[alias]
+    def get(self, alias: str) -> ForecastAdapter:
+        self.resolve(alias)
+        if alias not in self._instances:
+            raise AppError(
+                ErrorCode.MODEL_TIMEOUT,
+                f"Forecast model '{alias}' was not loaded at startup.",
+                503,
+            )
+        return self._instances[alias]
 
     async def predict(
         self,
@@ -83,7 +90,7 @@ class ForecastModelRegistry:
         forecast_dates: list[date],
         timeout_seconds: float,
     ) -> ForecastValues:
-        adapter = await self.get(model_alias)
+        adapter = self.get(model_alias)
         return await adapter.predict(history, forecast_dates, timeout_seconds)
 
 
@@ -211,7 +218,9 @@ class TimesFMForecaster:
 
 def default_model_specs(settings: Settings) -> list[ForecastModelSpec]:
     return [
-        ForecastModelSpec(settings.KRONOS_MODEL_ALIAS, "Kronos Base", settings.KRONOS_MODEL_ID),
+        ForecastModelSpec(settings.KRONOS_MINI_MODEL_ALIAS, "Kronos Mini", settings.KRONOS_MINI_MODEL_ID),
+        ForecastModelSpec(settings.KRONOS_SMALL_MODEL_ALIAS, "Kronos Small", settings.KRONOS_SMALL_MODEL_ID),
+        ForecastModelSpec(settings.KRONOS_BASE_MODEL_ALIAS, "Kronos Base", settings.KRONOS_BASE_MODEL_ID),
         ForecastModelSpec(settings.CHRONOS_MODEL_ALIAS, "Amazon Chronos-2", settings.CHRONOS_MODEL_ID),
         ForecastModelSpec(settings.TIMESFM_MODEL_ALIAS, "Google TimesFM 2.5", settings.TIMESFM_MODEL_ID),
     ]
@@ -219,7 +228,24 @@ def default_model_specs(settings: Settings) -> list[ForecastModelSpec]:
 
 def default_model_factories(settings: Settings) -> dict[str, ModelFactory]:
     return {
-        settings.KRONOS_MODEL_ALIAS: lambda: KronosForecaster.from_settings(settings),
+        settings.KRONOS_MINI_MODEL_ALIAS: lambda: KronosForecaster.from_settings(
+            settings,
+            model_id=settings.KRONOS_MINI_MODEL_ID,
+            tokenizer_id=settings.KRONOS_MINI_TOKENIZER_ID,
+            max_context=settings.KRONOS_MINI_MAX_CONTEXT,
+        ),
+        settings.KRONOS_SMALL_MODEL_ALIAS: lambda: KronosForecaster.from_settings(
+            settings,
+            model_id=settings.KRONOS_SMALL_MODEL_ID,
+            tokenizer_id=settings.KRONOS_SMALL_TOKENIZER_ID,
+            max_context=settings.KRONOS_SMALL_MAX_CONTEXT,
+        ),
+        settings.KRONOS_BASE_MODEL_ALIAS: lambda: KronosForecaster.from_settings(
+            settings,
+            model_id=settings.KRONOS_BASE_MODEL_ID,
+            tokenizer_id=settings.KRONOS_BASE_TOKENIZER_ID,
+            max_context=settings.KRONOS_BASE_MAX_CONTEXT,
+        ),
         settings.CHRONOS_MODEL_ALIAS: lambda: Chronos2Forecaster.from_settings(settings),
         settings.TIMESFM_MODEL_ALIAS: lambda: TimesFMForecaster.from_settings(settings),
     }

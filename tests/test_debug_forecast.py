@@ -9,7 +9,7 @@ from app.services.tiingo import KlinePoint
 
 
 class FakeModelRegistry:
-    specs = [ForecastModelSpec("kronos-base", "Kronos Base", "NeoQuasar/Kronos-base")]
+    specs = [ForecastModelSpec("kronos-mini", "Kronos Mini", "NeoQuasar/Kronos-mini")]
 
     def resolve(self, alias: str | None) -> ForecastModelSpec:
         return self.specs[0]

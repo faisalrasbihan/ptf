@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
@@ -18,10 +18,10 @@ class FakeModelRegistry:
         self,
         model_alias: str,
         history: list[KlinePoint],
-        forecast_dates: list[date],
+        forecast_timestamps: list[datetime],
         timeout_seconds: float,
     ) -> ForecastValues:
-        days = len(forecast_dates)
+        days = len(forecast_timestamps)
         return ForecastValues(
             open=[103.0 + index for index in range(days)],
             high=[106.0 + index for index in range(days)],
@@ -41,10 +41,10 @@ def test_debug_forecast_route_is_disabled_by_default() -> None:
 
 
 def test_debug_forecast_route_returns_png_when_enabled(monkeypatch) -> None:
-    async def fake_fetch_history(self, ticker: str) -> list[KlinePoint]:
+    async def fake_fetch_history(self, ticker: str, **kwargs) -> list[KlinePoint]:
         return [
-            KlinePoint(date=date(2026, 5, 13), open=99.0, high=101.0, low=98.0, close=100.0, volume=1000),
-            KlinePoint(date=date(2026, 5, 14), open=100.0, high=102.0, low=99.0, close=101.0, volume=1200),
+            KlinePoint(timestamp=datetime(2026, 5, 13, tzinfo=UTC), open=99.0, high=101.0, low=98.0, close=100.0, volume=1000),
+            KlinePoint(timestamp=datetime(2026, 5, 14, tzinfo=UTC), open=100.0, high=102.0, low=99.0, close=101.0, volume=1200),
         ]
 
     monkeypatch.setattr(
@@ -56,7 +56,7 @@ def test_debug_forecast_route_returns_png_when_enabled(monkeypatch) -> None:
     app.state.model_registry = FakeModelRegistry()
 
     with TestClient(app) as client:
-        response = client.get("/debug/forecast/aapl?days=5")
+        response = client.get("/debug/forecast/aapl?asset_type=stock&horizon=5d")
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/png"

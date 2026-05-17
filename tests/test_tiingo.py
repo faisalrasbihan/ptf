@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -16,6 +16,10 @@ from app.services.tiingo import KlinePoint, TiingoProvider
 def make_response(status_code: int, payload: object) -> httpx.Response:
     request = httpx.Request("GET", "https://example.test")
     return httpx.Response(status_code, json=payload, request=request)
+
+
+def point_at(year: int, month: int, day: int, hour: int = 0, **kwargs: object) -> KlinePoint:
+    return KlinePoint(timestamp=datetime(year, month, day, hour, tzinfo=UTC), **kwargs)
 
 
 class FrozenDate(date):
@@ -96,6 +100,7 @@ def enable_fake_redis(monkeypatch: pytest.MonkeyPatch, client: FakeRedis) -> Non
 
 def test_tiingo_provider_parses_history(monkeypatch: pytest.MonkeyPatch) -> None:
     async def fake_get(self: httpx.AsyncClient, *args: object, **kwargs: object) -> httpx.Response:
+        assert str(args[0]).endswith("/tiingo/daily/aapl/prices")
         return make_response(
             200,
             [
@@ -134,13 +139,75 @@ def test_tiingo_provider_parses_history(monkeypatch: pytest.MonkeyPatch) -> None
     ]
 
 
+def test_tiingo_provider_fetches_and_parses_crypto_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_get(self: httpx.AsyncClient, *args: object, **kwargs: object) -> httpx.Response:
+        assert str(args[0]) == "https://api.tiingo.com/tiingo/crypto/prices"
+        params = kwargs["params"]
+        assert params["tickers"] == "btcusd"
+        assert params["resampleFreq"] == "1hour"
+        return make_response(
+            200,
+            [
+                {
+                    "ticker": "btcusd",
+                    "baseCurrency": "btc",
+                    "quoteCurrency": "usd",
+                    "priceData": [
+                        {
+                            "date": "2026-05-15T09:00:00.000Z",
+                            "open": 100.0,
+                            "high": 103.0,
+                            "low": 99.0,
+                            "close": 102.0,
+                            "volume": 12.5,
+                            "volumeNotional": 1275.0,
+                        },
+                        {
+                            "date": "2026-05-15T10:00:00.000Z",
+                            "open": 102.0,
+                            "high": 104.0,
+                            "low": 101.0,
+                            "close": 103.0,
+                            "volume": 13.5,
+                        },
+                    ],
+                }
+            ],
+        )
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    history = asyncio.run(
+        TiingoProvider(settings).fetch_history("BTCUSD", asset_type="crypto", bar_interval="1h")
+    )
+
+    assert [(point.timestamp, point.close, point.volume) for point in history] == [
+        (datetime(2026, 5, 15, 9, tzinfo=UTC), 102.0, 12.5),
+        (datetime(2026, 5, 15, 10, tzinfo=UTC), 103.0, 13.5),
+    ]
+
+
+def test_tiingo_provider_maps_empty_crypto_price_data_to_ticker_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_get(self: httpx.AsyncClient, *args: object, **kwargs: object) -> httpx.Response:
+        return make_response(200, [{"ticker": "btcusd", "priceData": []}])
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    with pytest.raises(AppError) as exc:
+        asyncio.run(TiingoProvider(settings).fetch_history("BTCUSD", asset_type="crypto", bar_interval="1h"))
+
+    assert exc.value.code == ErrorCode.TICKER_NOT_FOUND
+
+
 def test_tiingo_provider_uses_cached_history_without_calling_tiingo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.services.tiingo.date", FrozenDate)
     cache = TiingoHistoryCache(settings)
     end_date = FrozenDate.today()
     start_date = end_date - timedelta(days=365 * settings.HISTORY_YEARS)
     cached_history = [
-        KlinePoint(date=date(2026, 5, 15), open=10.0, high=12.0, low=9.0, close=11.0, volume=1000.0)
+        point_at(2026, 5, 15, open=10.0, high=12.0, low=9.0, close=11.0, volume=1000.0)
     ]
     redis = FakeRedis(
         {
@@ -193,15 +260,18 @@ def test_tiingo_provider_stores_history_after_cache_miss(monkeypatch: pytest.Mon
     key = TiingoHistoryCache(settings).history_key("AAPL", start_date, end_date)
     cached_payload = json.loads(redis.store[key])
     assert history == [
-        KlinePoint(date=date(2026, 5, 15), open=10.0, high=12.0, low=9.0, close=11.0, volume=1000.0)
+        point_at(2026, 5, 15, open=10.0, high=12.0, low=9.0, close=11.0, volume=1000.0)
     ]
     assert cached_payload["ticker"] == "AAPL"
-    assert cached_payload["start_date"] == start_date.isoformat()
-    assert cached_payload["end_date"] == end_date.isoformat()
+    assert cached_payload["asset_type"] == "stock"
+    assert cached_payload["bar_interval"] == "1d"
+    assert cached_payload["start_time"] == start_date.isoformat()
+    assert cached_payload["end_time"] == end_date.isoformat()
     assert cached_payload["history_years"] == 2
     assert cached_payload["bars"] == [
         {
             "date": "2026-05-15",
+            "timestamp": "2026-05-15T00:00:00+00:00",
             "open": 10.0,
             "high": 12.0,
             "low": 9.0,
@@ -243,7 +313,7 @@ def test_tiingo_provider_falls_back_to_tiingo_when_redis_unavailable(
     history = asyncio.run(TiingoProvider(settings).fetch_history("AAPL"))
 
     assert history == [
-        KlinePoint(date=date(2026, 5, 15), open=10.0, high=12.0, low=9.0, close=11.0, volume=1000.0)
+        point_at(2026, 5, 15, open=10.0, high=12.0, low=9.0, close=11.0, volume=1000.0)
     ]
 
 
@@ -278,7 +348,7 @@ def test_tiingo_provider_ignores_malformed_cache_and_refreshes(
     history = asyncio.run(TiingoProvider(settings).fetch_history("AAPL"))
 
     assert history == [
-        KlinePoint(date=date(2026, 5, 15), open=10.0, high=12.0, low=9.0, close=11.0, volume=1000.0)
+        point_at(2026, 5, 15, open=10.0, high=12.0, low=9.0, close=11.0, volume=1000.0)
     ]
     assert key in redis.deleted
     assert json.loads(redis.store[key])["bars"][0]["date"] == "2026-05-15"
@@ -293,7 +363,7 @@ def test_tiingo_cache_key_includes_date_window_and_history_years(monkeypatch: py
     monkeypatch.setattr(settings, "HISTORY_YEARS", 3)
     third_key = cache.history_key("AAPL", date(2026, 1, 1), date(2026, 5, 17))
 
-    assert first_key == "ptf:tiingo:v1:history:AAPL:2026-01-01:2026-05-17:years:2"
+    assert first_key == "ptf:tiingo:v1:history:stock:1d:AAPL:2026-01-01:2026-05-17:years:2"
     assert second_key != first_key
     assert third_key != first_key
 

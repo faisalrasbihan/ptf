@@ -1,8 +1,8 @@
 # predictthefuture.xyz
 
-An open-source forecasting service for exploring what time-series foundation models predict for public stock prices, and how uncertain those predictions are.
+An open-source forecasting service for exploring what time-series foundation models predict for public stock and crypto prices, and how uncertain those predictions are.
 
-The project is intentionally framed as an educational and research-oriented tool. Stock prices are noisy, daily direction is often close to a random walk, and the useful part of a forecast is usually the uncertainty band rather than a single confident-looking number. This repository leans into that: it fetches recent market history, runs a forecasting model, labels the forecast with real trading dates, and returns history plus forecast data in one API response.
+The project is intentionally framed as an educational and research-oriented tool. Market prices are noisy, short-term direction is often close to a random walk, and the useful part of a forecast is usually the uncertainty band rather than a single confident-looking number. This repository leans into that: it fetches recent market history, runs a forecasting model, labels the forecast with future timestamps, and returns history plus forecast data in one API response.
 
 > Not financial advice. Forecasts from this project are illustrative only and should not be used as investment recommendations.
 
@@ -13,8 +13,8 @@ This repo currently contains the Python/FastAPI forecasting backend for predictt
 The backend owns the full pipeline:
 
 1. Validate a ticker, model alias, and forecast horizon.
-2. Fetch adjusted daily OHLCV history from Tiingo.
-3. Generate future NYSE trading dates.
+2. Fetch stock or crypto OHLCV history from Tiingo.
+3. Generate future NYSE trading-session timestamps for stocks or continuous UTC timestamps for crypto.
 4. Run a time-series foundation model.
 5. Return historical prices, forecast values, and a confidence-style band in a frontend-friendly shape.
 
@@ -23,7 +23,7 @@ The planned product is a single-page web app with a thin frontend and this servi
 ## Features
 
 - FastAPI service with typed Pydantic request and response schemas.
-- Tiingo daily adjusted OHLCV data provider.
+- Tiingo stock and crypto OHLCV data providers.
 - NYSE trading-calendar support via `pandas-market-calendars`.
 - Model registry with support for:
   - `kronos-mini`
@@ -47,8 +47,8 @@ Client or frontend
       v
 FastAPI service
       |
-      |-- Fetch adjusted daily OHLCV history from Tiingo
-      |-- Build future NYSE trading sessions
+      |-- Fetch stock or crypto OHLCV history from Tiingo
+      |-- Build future forecast timestamps
       |-- Run selected forecasting model
       |-- Shape history + forecast response
       v
@@ -99,25 +99,31 @@ Content-Type: application/json
 ```json
 {
   "ticker": "AAPL",
+  "asset_type": "stock",
   "model": "kronos-base",
-  "days": 30
+  "horizon": "30d"
 }
 ```
 
 Fields:
 
-- `ticker`: required. Normalized to uppercase.
+- `ticker`: required. Normalized to uppercase. Crypto pairs accept compact or separated USD-pair format such as `BTCUSD`, `BTC/USD`, or `BTC-USD`.
+- `asset_type`: required. Must be `stock` or `crypto`.
 - `model`: optional. Defaults to the configured `KRONOS_MODEL_ALIAS`.
-- `days`: optional. Defaults to `DEFAULT_FORECAST_DAYS`. Must be between `MIN_FORECAST_DAYS` and `MAX_FORECAST_DAYS`.
+- `horizon`: required. Stocks use day format like `10d`, interpreted as NYSE trading sessions. Crypto supports `1h`, `4h`, `24h`, and `7d`.
 
 Example response:
 
 ```json
 {
   "ticker": "AAPL",
+  "asset_type": "stock",
+  "horizon": "30d",
+  "bar_interval": "1d",
   "history": [
     {
       "date": "2026-05-13",
+      "timestamp": "2026-05-13T00:00:00Z",
       "open": 183.0,
       "high": 185.0,
       "low": 182.5,
@@ -128,6 +134,7 @@ Example response:
   "forecast": [
     {
       "date": "2026-05-14",
+      "timestamp": "2026-05-14T00:00:00Z",
       "open": 184.62,
       "high": 188.04,
       "low": 181.09,
@@ -137,7 +144,6 @@ Example response:
     }
   ],
   "model": "kronos-base",
-  "days": 30,
   "generated_at": "2026-05-14T12:00:00Z"
 }
 ```
@@ -211,7 +217,6 @@ TIINGO_KEY=your_tiingo_api_key
 
 # Optional overrides
 KRONOS_MODEL_ALIAS=kronos-base
-DEFAULT_FORECAST_DAYS=30
 MIN_FORECAST_DAYS=5
 MAX_FORECAST_DAYS=90
 MODEL_TIMEOUT_SECONDS=60
@@ -235,7 +240,15 @@ Try a forecast:
 ```bash
 curl -s http://127.0.0.1:8000/forecast \
   -H 'Content-Type: application/json' \
-  -d '{"ticker":"AAPL","model":"kronos-base","days":30}'
+  -d '{"ticker":"AAPL","asset_type":"stock","model":"kronos-base","horizon":"30d"}'
+```
+
+Try a crypto forecast:
+
+```bash
+curl -s http://127.0.0.1:8000/forecast \
+  -H 'Content-Type: application/json' \
+  -d '{"ticker":"BTC/USD","asset_type":"crypto","model":"kronos-small","horizon":"24h"}'
 ```
 
 ## Configuration
@@ -247,9 +260,8 @@ Common settings:
 | Variable | Default | Purpose |
 |---|---:|---|
 | `TIINGO_KEY` | empty | Tiingo API token. Required for real data fetches. |
-| `DEFAULT_FORECAST_DAYS` | `30` | Default forecast horizon in trading days. |
-| `MIN_FORECAST_DAYS` | `5` | Minimum accepted horizon. |
-| `MAX_FORECAST_DAYS` | `90` | Maximum accepted horizon. |
+| `MIN_FORECAST_DAYS` | `5` | Minimum accepted stock day horizon. |
+| `MAX_FORECAST_DAYS` | `90` | Maximum accepted stock day horizon. |
 | `HISTORY_YEARS` | `2` | Lookback window fetched from Tiingo. |
 | `MODEL_TIMEOUT_SECONDS` | `60` | Inference timeout. |
 | `DEBUG_ENDPOINTS_ENABLED` | `false` | Enables debug chart routes. |
@@ -263,7 +275,7 @@ Model IDs and aliases can also be overridden with the variables defined in `app/
 When `DEBUG_ENDPOINTS_ENABLED=true`, the service exposes:
 
 ```http
-GET /debug/forecast/{ticker}?model=kronos-base&days=30
+GET /debug/forecast/{ticker}?asset_type=stock&model=kronos-base&horizon=30d
 ```
 
 It returns a PNG chart rendered from the forecast response. This is useful for quick backend-only visual checks.

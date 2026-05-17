@@ -12,7 +12,7 @@ def prepare_history(
     require_ohlcv: bool,
     min_points: int = 2,
 ) -> list[KlinePoint]:
-    deduped = {point.date: point for point in history}
+    deduped = {point.timestamp: point for point in history}
     cleaned = [point for _, point in sorted(deduped.items()) if _is_valid_point(point, require_ohlcv)]
     if len(cleaned) < min_points:
         raise AppError(

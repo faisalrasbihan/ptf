@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -23,17 +23,21 @@ class FakeAdapter:
     async def predict(
         self,
         history: list[KlinePoint],
-        forecast_dates: list[date],
+        forecast_timestamps: list[datetime],
         timeout_seconds: float,
     ) -> ForecastValues:
         return ForecastValues(open=[], high=[], low=[], close=[], volume=[])
 
 
+def _point(year: int, month: int, day: int, **kwargs) -> KlinePoint:
+    return KlinePoint(timestamp=datetime(year, month, day, tzinfo=UTC), **kwargs)
+
+
 def _history() -> list[KlinePoint]:
     return [
-        KlinePoint(date=date(2026, 5, 11), open=98.0, high=101.0, low=97.0, close=100.0, volume=1000.0),
-        KlinePoint(date=date(2026, 5, 12), open=100.0, high=103.0, low=99.0, close=102.0, volume=1100.0),
-        KlinePoint(date=date(2026, 5, 13), open=102.0, high=104.0, low=101.0, close=103.0, volume=1200.0),
+        _point(2026, 5, 11, open=98.0, high=101.0, low=97.0, close=100.0, volume=1000.0),
+        _point(2026, 5, 12, open=100.0, high=103.0, low=99.0, close=102.0, volume=1100.0),
+        _point(2026, 5, 13, open=102.0, high=104.0, low=101.0, close=103.0, volume=1200.0),
     ]
 
 
@@ -124,7 +128,11 @@ def test_chronos_adapter_maps_quantiles_to_close_band() -> None:
     forecaster = Chronos2Forecaster(FakeChronosPipeline(), settings)
     forecast = forecaster._predict_sync(
         _history(),
-        [date(2026, 5, 14), date(2026, 5, 15), date(2026, 5, 18)],
+        [
+            datetime(2026, 5, 14, tzinfo=UTC),
+            datetime(2026, 5, 15, tzinfo=UTC),
+            datetime(2026, 5, 18, tzinfo=UTC),
+        ],
     )
 
     assert forecast.open == [11.0, 12.0, 13.0]
@@ -148,7 +156,11 @@ def test_timesfm_adapter_maps_point_forecast_and_quantile_bounds() -> None:
     forecaster = TimesFMForecaster(FakeTimesFM(), settings)
     forecast = forecaster._predict_sync(
         _history(),
-        [date(2026, 5, 14), date(2026, 5, 15), date(2026, 5, 18)],
+        [
+            datetime(2026, 5, 14, tzinfo=UTC),
+            datetime(2026, 5, 15, tzinfo=UTC),
+            datetime(2026, 5, 18, tzinfo=UTC),
+        ],
     )
 
     assert forecast.open == [11.0, 12.0, 13.0]

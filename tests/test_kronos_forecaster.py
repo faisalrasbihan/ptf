@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import UTC, datetime
 
 import pandas as pd
 
@@ -38,12 +38,16 @@ class FakePredictor:
 def test_kronos_forecaster_maps_ohlc_to_forecast_band() -> None:
     forecaster = KronosForecaster(FakePredictor(), settings)
     history = [
-        KlinePoint(date=date(2026, 5, 11), open=7.0, high=8.0, low=6.0, close=7.5, volume=1000),
-        KlinePoint(date=date(2026, 5, 12), open=8.0, high=9.0, low=7.0, close=8.5, volume=1200),
+        KlinePoint(timestamp=datetime(2026, 5, 11, tzinfo=UTC), open=7.0, high=8.0, low=6.0, close=7.5, volume=1000),
+        KlinePoint(timestamp=datetime(2026, 5, 12, tzinfo=UTC), open=8.0, high=9.0, low=7.0, close=8.5, volume=1200),
     ]
-    forecast_dates = [date(2026, 5, 13), date(2026, 5, 14), date(2026, 5, 15)]
+    forecast_timestamps = [
+        datetime(2026, 5, 13, tzinfo=UTC),
+        datetime(2026, 5, 14, tzinfo=UTC),
+        datetime(2026, 5, 15, tzinfo=UTC),
+    ]
 
-    forecast = asyncio.run(forecaster.predict(history, forecast_dates, 1.0))
+    forecast = asyncio.run(forecaster.predict(history, forecast_timestamps, 1.0))
 
     assert forecast.open == [10.0, 11.0, 12.0]
     assert forecast.high == [12.0, 13.0, 14.0]

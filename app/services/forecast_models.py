@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 import json
 import os
 from typing import Protocol
@@ -22,7 +22,7 @@ class ForecastAdapter(Protocol):
     async def predict(
         self,
         history: list[KlinePoint],
-        forecast_dates: list[date],
+        forecast_timestamps: list[datetime],
         timeout_seconds: float,
     ) -> ForecastValues: ...
 
@@ -89,11 +89,11 @@ class ForecastModelRegistry:
         self,
         model_alias: str,
         history: list[KlinePoint],
-        forecast_dates: list[date],
+        forecast_timestamps: list[datetime],
         timeout_seconds: float,
     ) -> ForecastValues:
         adapter = self.get(model_alias)
-        return await adapter.predict(history, forecast_dates, timeout_seconds)
+        return await adapter.predict(history, forecast_timestamps, timeout_seconds)
 
 
 class Chronos2Forecaster:
@@ -116,12 +116,12 @@ class Chronos2Forecaster:
     async def predict(
         self,
         history: list[KlinePoint],
-        forecast_dates: list[date],
+        forecast_timestamps: list[datetime],
         timeout_seconds: float,
     ) -> ForecastValues:
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(self._predict_sync, history, forecast_dates),
+                asyncio.to_thread(self._predict_sync, history, forecast_timestamps),
                 timeout=timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
@@ -135,7 +135,7 @@ class Chronos2Forecaster:
                 504,
             ) from exc
 
-    def _predict_sync(self, history: list[KlinePoint], forecast_dates: list[date]) -> ForecastValues:
+    def _predict_sync(self, history: list[KlinePoint], forecast_timestamps: list[datetime]) -> ForecastValues:
         context = prepare_history(history, require_ohlcv=False, min_points=3)
         volume = last_finite_volume(context)
         context_df = pd.DataFrame(
@@ -147,14 +147,14 @@ class Chronos2Forecaster:
         )
         pred_df = self.pipeline.predict_df(
             context_df,
-            prediction_length=len(forecast_dates),
+            prediction_length=len(forecast_timestamps),
             quantile_levels=self.QUANTILE_LEVELS,
             id_column="item_id",
             timestamp_column="timestamp",
             target="target",
             validate_inputs=False,
         )
-        pred_df = pred_df.head(len(forecast_dates))
+        pred_df = pred_df.head(len(forecast_timestamps))
         median = _float_column(pred_df, "0.5", "predictions")
         low = _float_column(pred_df, "0.1", "predictions")
         high = _float_column(pred_df, "0.9", "predictions")
@@ -187,12 +187,12 @@ class TimesFMForecaster:
     async def predict(
         self,
         history: list[KlinePoint],
-        forecast_dates: list[date],
+        forecast_timestamps: list[datetime],
         timeout_seconds: float,
     ) -> ForecastValues:
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(self._predict_sync, history, forecast_dates),
+                asyncio.to_thread(self._predict_sync, history, forecast_timestamps),
                 timeout=timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
@@ -206,14 +206,14 @@ class TimesFMForecaster:
                 504,
             ) from exc
 
-    def _predict_sync(self, history: list[KlinePoint], forecast_dates: list[date]) -> ForecastValues:
+    def _predict_sync(self, history: list[KlinePoint], forecast_timestamps: list[datetime]) -> ForecastValues:
         context = prepare_history(history, require_ohlcv=False, min_points=3)[-self.settings.TIMESFM_MAX_CONTEXT :]
         volume = last_finite_volume(context)
         point_forecast, quantile_forecast = self.model.forecast(
-            horizon=len(forecast_dates),
+            horizon=len(forecast_timestamps),
             inputs=[np.array([point.close for point in context], dtype=float)],
         )
-        median = [float(value) for value in np.asarray(point_forecast)[0, : len(forecast_dates)]]
+        median = [float(value) for value in np.asarray(point_forecast)[0, : len(forecast_timestamps)]]
         low, high = _timesfm_bounds(quantile_forecast, median)
         return _close_band_values(median, low, high, volume)
 

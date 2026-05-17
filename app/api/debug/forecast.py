@@ -15,10 +15,11 @@ router = APIRouter()
 async def debug_forecast_chart(
     ticker: str,
     request: Request,
+    asset_type: str,
+    horizon: str,
     model: str | None = None,
-    days: str | None = None,
 ) -> Response:
-    payload = ForecastRequest(ticker=ticker, model=model, days=days)
+    payload = ForecastRequest(ticker=ticker, asset_type=asset_type, model=model, horizon=horizon)
     forecast = await build_forecast_response(
         payload=payload,
         settings=settings,

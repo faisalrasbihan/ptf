@@ -24,10 +24,10 @@ def render_forecast_png(forecast: ForecastResponse) -> bytes:
         sharex=True,
     )
 
-    history_dates = [point.date for point in forecast.history]
+    history_dates = [point.timestamp for point in forecast.history]
     history_prices = [point.close for point in forecast.history]
     history_volumes = [point.volume for point in forecast.history]
-    forecast_dates = [point.date for point in forecast.forecast]
+    forecast_dates = [point.timestamp for point in forecast.forecast]
     forecast_prices = [point.median for point in forecast.forecast]
     forecast_lows = [point.low for point in forecast.forecast]
     forecast_highs = [point.high for point in forecast.forecast]
@@ -91,9 +91,8 @@ def render_forecast_png(forecast: ForecastResponse) -> bytes:
         zorder=3,
     )
 
-    title_horizon = "Day" if forecast.days == 1 else "Days"
     figure.suptitle(
-        f"{forecast.ticker} Probabilistic Price & Volume Forecast (Next {forecast.days} {title_horizon})",
+        f"{forecast.ticker} Probabilistic Price & Volume Forecast (Next {forecast.horizon})",
         fontsize=18,
         fontweight="bold",
     )

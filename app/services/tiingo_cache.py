@@ -16,7 +16,8 @@ except ImportError:  # pragma: no cover - exercised only when optional dependenc
         pass
 
 
-PointFactory = Callable[[date, float, float, float, float, float], Any]
+TimeLike = date | datetime
+PointFactory = Callable[[datetime, float, float, float, float, float], Any]
 
 _CLIENTS: dict[str, Any] = {}
 
@@ -33,28 +34,48 @@ class TiingoHistoryCache:
             and redis_asyncio is not None
         )
 
-    def history_key(self, ticker: str, start_date: date, end_date: date) -> str:
+    def history_key(
+        self,
+        ticker: str,
+        start_time: TimeLike,
+        end_time: TimeLike,
+        *,
+        asset_type: str = "stock",
+        bar_interval: str = "1d",
+    ) -> str:
         return (
             f"{self.settings.TIINGO_CACHE_NAMESPACE}:history:"
-            f"{ticker.upper()}:{start_date.isoformat()}:{end_date.isoformat()}:"
+            f"{asset_type}:{bar_interval}:{ticker.upper()}:"
+            f"{_time_key(start_time)}:{_time_key(end_time)}:"
             f"years:{self.settings.HISTORY_YEARS}"
         )
 
-    def lock_key(self, ticker: str, start_date: date, end_date: date) -> str:
-        return f"{self.history_key(ticker, start_date, end_date)}:lock"
+    def lock_key(
+        self,
+        ticker: str,
+        start_time: TimeLike,
+        end_time: TimeLike,
+        *,
+        asset_type: str = "stock",
+        bar_interval: str = "1d",
+    ) -> str:
+        return f"{self.history_key(ticker, start_time, end_time, asset_type=asset_type, bar_interval=bar_interval)}:lock"
 
     async def get_history(
         self,
         ticker: str,
-        start_date: date,
-        end_date: date,
+        start_time: TimeLike,
+        end_time: TimeLike,
         point_factory: PointFactory,
+        *,
+        asset_type: str = "stock",
+        bar_interval: str = "1d",
     ) -> list[Any] | None:
         client = self._client()
         if client is None:
             return None
 
-        key = self.history_key(ticker, start_date, end_date)
+        key = self.history_key(ticker, start_time, end_time, asset_type=asset_type, bar_interval=bar_interval)
         try:
             raw_payload = await client.get(key)
         except RedisError:
@@ -67,43 +88,71 @@ class TiingoHistoryCache:
             return self._deserialize_history(
                 raw_payload,
                 ticker=ticker,
-                start_date=start_date,
-                end_date=end_date,
+                start_time=start_time,
+                end_time=end_time,
+                asset_type=asset_type,
+                bar_interval=bar_interval,
                 point_factory=point_factory,
             )
         except (TypeError, ValueError, json.JSONDecodeError, KeyError):
-            await self.delete_history(ticker, start_date, end_date)
+            await self.delete_history(ticker, start_time, end_time, asset_type=asset_type, bar_interval=bar_interval)
             return None
 
     async def set_history(
         self,
         ticker: str,
-        start_date: date,
-        end_date: date,
+        start_time: TimeLike,
+        end_time: TimeLike,
         history: list[Any],
+        *,
+        asset_type: str = "stock",
+        bar_interval: str = "1d",
     ) -> None:
         client = self._client()
         if client is None:
             return
 
-        key = self.history_key(ticker, start_date, end_date)
-        payload = self._serialize_history(ticker, start_date, end_date, history)
+        key = self.history_key(ticker, start_time, end_time, asset_type=asset_type, bar_interval=bar_interval)
+        payload = self._serialize_history(
+            ticker,
+            start_time,
+            end_time,
+            history,
+            asset_type=asset_type,
+            bar_interval=bar_interval,
+        )
         try:
             await client.set(key, payload, ex=self._ttl_seconds())
         except RedisError:
             return
 
-    async def delete_history(self, ticker: str, start_date: date, end_date: date) -> None:
+    async def delete_history(
+        self,
+        ticker: str,
+        start_time: TimeLike,
+        end_time: TimeLike,
+        *,
+        asset_type: str = "stock",
+        bar_interval: str = "1d",
+    ) -> None:
         client = self._client()
         if client is None:
             return
 
         try:
-            await client.delete(self.history_key(ticker, start_date, end_date))
+            await client.delete(self.history_key(ticker, start_time, end_time, asset_type=asset_type, bar_interval=bar_interval))
         except RedisError:
             return
 
-    async def acquire_lock(self, ticker: str, start_date: date, end_date: date) -> str | None:
+    async def acquire_lock(
+        self,
+        ticker: str,
+        start_time: TimeLike,
+        end_time: TimeLike,
+        *,
+        asset_type: str = "stock",
+        bar_interval: str = "1d",
+    ) -> str | None:
         client = self._client()
         if client is None:
             return None
@@ -111,7 +160,7 @@ class TiingoHistoryCache:
         token = uuid.uuid4().hex
         try:
             locked = await client.set(
-                self.lock_key(ticker, start_date, end_date),
+                self.lock_key(ticker, start_time, end_time, asset_type=asset_type, bar_interval=bar_interval),
                 token,
                 nx=True,
                 ex=max(1, self.settings.TIINGO_CACHE_LOCK_SECONDS),
@@ -121,7 +170,16 @@ class TiingoHistoryCache:
 
         return token if locked else None
 
-    async def release_lock(self, ticker: str, start_date: date, end_date: date, token: str) -> None:
+    async def release_lock(
+        self,
+        ticker: str,
+        start_time: TimeLike,
+        end_time: TimeLike,
+        token: str,
+        *,
+        asset_type: str = "stock",
+        bar_interval: str = "1d",
+    ) -> None:
         client = self._client()
         if client is None:
             return
@@ -131,7 +189,7 @@ class TiingoHistoryCache:
             "then return redis.call('del', KEYS[1]) else return 0 end"
         )
         try:
-            await client.eval(script, 1, self.lock_key(ticker, start_date, end_date), token)
+            await client.eval(script, 1, self.lock_key(ticker, start_time, end_time, asset_type=asset_type, bar_interval=bar_interval), token)
         except RedisError:
             return
 
@@ -157,19 +215,25 @@ class TiingoHistoryCache:
     def _serialize_history(
         self,
         ticker: str,
-        start_date: date,
-        end_date: date,
+        start_time: TimeLike,
+        end_time: TimeLike,
         history: list[Any],
+        *,
+        asset_type: str = "stock",
+        bar_interval: str = "1d",
     ) -> str:
         payload = {
             "ticker": ticker.upper(),
-            "start_date": start_date.isoformat(),
-            "end_date": end_date.isoformat(),
+            "asset_type": asset_type,
+            "bar_interval": bar_interval,
+            "start_time": _time_key(start_time),
+            "end_time": _time_key(end_time),
             "history_years": self.settings.HISTORY_YEARS,
             "cached_at": datetime.now(UTC).isoformat(),
             "bars": [
                 {
                     "date": point.date.isoformat(),
+                    "timestamp": point.timestamp.isoformat(),
                     "open": float(point.open),
                     "high": float(point.high),
                     "low": float(point.low),
@@ -186,8 +250,10 @@ class TiingoHistoryCache:
         raw_payload: str | bytes,
         *,
         ticker: str,
-        start_date: date,
-        end_date: date,
+        start_time: TimeLike,
+        end_time: TimeLike,
+        asset_type: str,
+        bar_interval: str,
         point_factory: PointFactory,
     ) -> list[Any]:
         if isinstance(raw_payload, bytes):
@@ -199,10 +265,14 @@ class TiingoHistoryCache:
 
         if payload.get("ticker") != ticker.upper():
             raise ValueError("Cache ticker mismatch.")
-        if payload.get("start_date") != start_date.isoformat():
-            raise ValueError("Cache start date mismatch.")
-        if payload.get("end_date") != end_date.isoformat():
-            raise ValueError("Cache end date mismatch.")
+        if payload.get("asset_type") != asset_type:
+            raise ValueError("Cache asset type mismatch.")
+        if payload.get("bar_interval") != bar_interval:
+            raise ValueError("Cache bar interval mismatch.")
+        if payload.get("start_time") != _time_key(start_time):
+            raise ValueError("Cache start time mismatch.")
+        if payload.get("end_time") != _time_key(end_time):
+            raise ValueError("Cache end time mismatch.")
         if payload.get("history_years") != self.settings.HISTORY_YEARS:
             raise ValueError("Cache history window mismatch.")
 
@@ -216,7 +286,7 @@ class TiingoHistoryCache:
                 raise ValueError("Cache bar must be an object.")
             history.append(
                 point_factory(
-                    date.fromisoformat(str(item["date"])),
+                    datetime.fromisoformat(str(item["timestamp"])),
                     float(item["open"]),
                     float(item["high"]),
                     float(item["low"]),
@@ -225,3 +295,9 @@ class TiingoHistoryCache:
                 )
             )
         return history
+
+
+def _time_key(value: TimeLike) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value.isoformat()

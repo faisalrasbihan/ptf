@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 import pandas_market_calendars as mcal
 
@@ -20,3 +20,19 @@ def next_us_trading_dates(last_history_date: date, days: int) -> list[date]:
         sessions = [session.date() for session in schedule.index]
 
     return sessions[:days]
+
+
+def next_us_trading_timestamps(last_history_timestamp: datetime, days: int) -> list[datetime]:
+    return [
+        datetime.combine(session, time.min, tzinfo=UTC)
+        for session in next_us_trading_dates(last_history_timestamp.date(), days)
+    ]
+
+
+def next_continuous_timestamps(
+    last_history_timestamp: datetime,
+    *,
+    steps: int,
+    step: timedelta,
+) -> list[datetime]:
+    return [last_history_timestamp + step * index for index in range(1, steps + 1)]

@@ -38,7 +38,6 @@ class Settings(BaseSettings):
     TIMESFM_MODEL_ALIAS: str = "google-timesfm-2.5"
     TIMESFM_MAX_CONTEXT: int = 1024
     TIMESFM_MAX_HORIZON: int = 256
-    DEFAULT_FORECAST_DAYS: int = 30
     MIN_FORECAST_DAYS: int = 5
     MAX_FORECAST_DAYS: int = 90
     TIINGO_TIMEOUT_SECONDS: float = 15.0

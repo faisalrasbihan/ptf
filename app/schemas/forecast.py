@@ -1,13 +1,16 @@
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ForecastRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     ticker: str = Field(min_length=1)
+    asset_type: Literal["stock", "crypto"]
     model: str | None = None
-    days: int | None = None
+    horizon: str = Field(min_length=1)
 
     @field_validator("ticker")
     @classmethod
@@ -17,6 +20,11 @@ class ForecastRequest(BaseModel):
             raise ValueError("Ticker is required.")
         return ticker
 
+    @field_validator("asset_type", mode="before")
+    @classmethod
+    def normalize_asset_type(cls, value: Any) -> str:
+        return str(value).strip().lower()
+
     @field_validator("model", mode="before")
     @classmethod
     def normalize_empty_model(cls, value: Any) -> str | None:
@@ -24,16 +32,18 @@ class ForecastRequest(BaseModel):
             return None
         return str(value)
 
-    @field_validator("days", mode="before")
+    @field_validator("horizon", mode="before")
     @classmethod
-    def normalize_empty_days(cls, value: Any) -> int | None:
-        if value is None or value == "":
-            return None
-        return value
+    def normalize_horizon(cls, value: Any) -> str:
+        horizon = str(value).strip().lower()
+        if not horizon:
+            raise ValueError("Horizon is required.")
+        return horizon
 
 
 class HistoryPoint(BaseModel):
     date: date
+    timestamp: datetime
     open: float
     high: float
     low: float
@@ -43,6 +53,7 @@ class HistoryPoint(BaseModel):
 
 class ForecastPoint(BaseModel):
     date: date
+    timestamp: datetime
     open: float
     high: float
     low: float
@@ -53,10 +64,12 @@ class ForecastPoint(BaseModel):
 
 class ForecastResponse(BaseModel):
     ticker: str
+    asset_type: Literal["stock", "crypto"]
+    horizon: str
+    bar_interval: str
     history: list[HistoryPoint]
     forecast: list[ForecastPoint]
     model: str
-    days: int
     generated_at: datetime
 
 
@@ -73,6 +86,10 @@ class ResolvedForecastRequest(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     ticker: str
+    asset_type: Literal["stock", "crypto"]
     model_alias: str
     model_id: str
-    days: int
+    horizon: str
+    forecast_steps: int
+    bar_interval: str
+    tiingo_resample_freq: str | None = None

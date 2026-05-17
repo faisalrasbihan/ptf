@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass
-from datetime import date
+from datetime import datetime
 
 import pandas as pd
 from model import Kronos, KronosPredictor, KronosTokenizer
@@ -49,12 +49,12 @@ class KronosForecaster:
     async def predict(
         self,
         history: list[KlinePoint],
-        forecast_dates: list[date],
+        forecast_timestamps: list[datetime],
         timeout_seconds: float,
     ) -> ForecastValues:
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(self._predict_sync, history, forecast_dates),
+                asyncio.to_thread(self._predict_sync, history, forecast_timestamps),
                 timeout=timeout_seconds,
             )
         except asyncio.TimeoutError as exc:
@@ -75,7 +75,7 @@ class KronosForecaster:
     def _predict_sync(
         self,
         history: list[KlinePoint],
-        forecast_dates: list[date],
+        forecast_timestamps: list[datetime],
     ) -> ForecastValues:
         context = prepare_history(history, require_ohlcv=True)[-self.max_context :]
         x_df = pd.DataFrame(
@@ -87,14 +87,14 @@ class KronosForecaster:
                 "volume": [point.volume for point in context],
             }
         )
-        x_timestamp = pd.Series(pd.to_datetime([point.date for point in context]))
-        y_timestamp = pd.Series(pd.to_datetime(forecast_dates))
+        x_timestamp = pd.Series(pd.to_datetime([point.timestamp for point in context]))
+        y_timestamp = pd.Series(pd.to_datetime(forecast_timestamps))
 
         pred_df = self.predictor.predict(
             df=x_df,
             x_timestamp=x_timestamp,
             y_timestamp=y_timestamp,
-            pred_len=len(forecast_dates),
+            pred_len=len(forecast_timestamps),
             T=self.settings.KRONOS_TEMPERATURE,
             top_p=self.settings.KRONOS_TOP_P,
             sample_count=self.settings.KRONOS_SAMPLE_COUNT,

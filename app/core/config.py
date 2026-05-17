@@ -6,6 +6,11 @@ class Settings(BaseSettings):
     VERSION: str = "0.1.0"
     DEBUG: bool = False
     TIINGO_KEY: str = ""
+    REDIS_URL: str = ""
+    TIINGO_CACHE_ENABLED: bool = True
+    TIINGO_CACHE_NAMESPACE: str = "ptf:tiingo:v1"
+    TIINGO_CACHE_STALE_AFTER_HOURS: int = 30
+    TIINGO_CACHE_LOCK_SECONDS: int = 30
     KRONOS_MODEL_ID: str = "NeoQuasar/Kronos-mini"
     KRONOS_TOKENIZER_ID: str = "NeoQuasar/Kronos-Tokenizer-2k"
     KRONOS_MODEL_ALIAS: str = "kronos-mini"

@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -6,6 +7,7 @@ import httpx
 
 from app.core.config import Settings
 from app.services.errors import AppError, ErrorCode
+from app.services.tiingo_cache import TiingoHistoryCache
 
 
 @dataclass(slots=True)
@@ -32,8 +34,54 @@ class TiingoProvider:
                 502,
             )
 
+        ticker_key = ticker.strip().upper()
         end_date = date.today()
         start_date = end_date - timedelta(days=365 * self.settings.HISTORY_YEARS)
+        cache = TiingoHistoryCache(self.settings)
+
+        if cache.enabled:
+            cached_history = await cache.get_history(ticker_key, start_date, end_date, KlinePoint)
+            if cached_history is not None:
+                return cached_history
+
+            lock_token = await cache.acquire_lock(ticker_key, start_date, end_date)
+            if lock_token is not None:
+                try:
+                    history = await self._fetch_history_from_tiingo(ticker_key, start_date, end_date)
+                    await cache.set_history(ticker_key, start_date, end_date, history)
+                    return history
+                finally:
+                    await cache.release_lock(ticker_key, start_date, end_date, lock_token)
+
+            cached_history = await self._wait_for_cached_history(cache, ticker_key, start_date, end_date)
+            if cached_history is not None:
+                return cached_history
+
+        history = await self._fetch_history_from_tiingo(ticker_key, start_date, end_date)
+        if cache.enabled:
+            await cache.set_history(ticker_key, start_date, end_date, history)
+        return history
+
+    async def _wait_for_cached_history(
+        self,
+        cache: TiingoHistoryCache,
+        ticker: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[KlinePoint] | None:
+        for _ in range(5):
+            await asyncio.sleep(0.1)
+            cached_history = await cache.get_history(ticker, start_date, end_date, KlinePoint)
+            if cached_history is not None:
+                return cached_history
+        return None
+
+    async def _fetch_history_from_tiingo(
+        self,
+        ticker: str,
+        start_date: date,
+        end_date: date,
+    ) -> list[KlinePoint]:
         url = f"{self.BASE_URL}/{ticker.lower()}/prices"
         params = {
             "startDate": start_date.isoformat(),

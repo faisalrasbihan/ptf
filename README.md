@@ -285,7 +285,7 @@ The repository includes a Railway/Railpack start command:
 ```json
 {
   "deploy": {
-    "startCommand": "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+    "startCommand": "uvicorn app.main:app --host :: --port ${PORT:-8000}"
   }
 }
 ```
